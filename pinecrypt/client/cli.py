@@ -1,7 +1,6 @@
 # coding: utf-8
 
 import click
-import const
 import hashlib
 import logging
 import os
@@ -13,7 +12,6 @@ import socket
 import subprocess
 import sys
 import requests
-from jinja2 import Environment, PackageLoader
 from ipsecparse import loads
 from asn1crypto import pem, x509
 from asn1crypto.csr import CertificationRequest
@@ -22,6 +20,7 @@ from csrbuilder import CSRBuilder, pem_armor_csr
 from configparser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
 from oscrypto import asymmetric
+from pinecrypt.client import const
 
 class ConfigTreeParser(ConfigParser):
     def __init__(self, path, *args, **kwargs):
@@ -43,6 +42,7 @@ class ConfigTreeParser(ConfigParser):
 @click.argument("authority")
 def certidude_provision(authority):
     client_config = ConfigParser()
+    os.makedirs(os.path.dirname(const.CLIENT_CONFIG_PATH))
     if os.path.exists(const.CLIENT_CONFIG_PATH):
         client_config.read_file(open(const.CLIENT_CONFIG_PATH))
     if client_config.has_section(authority):
@@ -60,7 +60,7 @@ def certidude_provision(authority):
         with open(const.CLIENT_CONFIG_PATH + ".part", 'w') as fh:
             client_config.write(fh)
         os.rename(const.CLIENT_CONFIG_PATH + ".part", const.CLIENT_CONFIG_PATH)
-
+    os.system("certidude enroll")
 
 @click.command("enroll", help="Run processes for requesting certificates and configuring services")
 @click.option("-k", "--kerberos", default=False, is_flag=True, help="Offer system keytab for auth")
