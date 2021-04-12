@@ -52,7 +52,10 @@ class ConfigTreeParser(ConfigParser):
 @click.argument("authority")
 def certidude_provision(authority):
     client_config = ConfigParser()
-    os.makedirs(os.path.dirname(const.CLIENT_CONFIG_PATH))
+    try:
+        os.makedirs(os.path.dirname(const.CLIENT_CONFIG_PATH))
+    except FileExistsError:
+        pass
     if os.path.exists(const.CLIENT_CONFIG_PATH):
         client_config.read_file(open(const.CLIENT_CONFIG_PATH))
     if client_config.has_section(authority):
