@@ -22,6 +22,16 @@ from datetime import datetime, timedelta
 from oscrypto import asymmetric
 from pinecrypt.client import const
 
+
+def selinux_fixup(path):
+    """
+    Fix OpenVPN credential store security context on Fedora
+    """
+    if os.path.exists("/usr/bin/chcon"):
+        cmd = "chcon", "--type=home_cert_t", path
+        subprocess.call(cmd)
+
+
 class ConfigTreeParser(ConfigParser):
     def __init__(self, path, *args, **kwargs):
         ConfigParser.__init__(self, *args, **kwargs)
