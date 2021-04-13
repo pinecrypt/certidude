@@ -3,6 +3,7 @@
 import click
 import hashlib
 import logging
+import json
 import os
 import random
 import re
@@ -78,22 +79,18 @@ def certidude_provision(authority):
 @click.command("enroll", help="Run processes for requesting certificates and configuring services")
 @click.option("-k", "--kerberos", default=False, is_flag=True, help="Offer system keytab for auth")
 @click.option("-f", "--fork", default=False, is_flag=True, help="Fork to background")
-@click.option("-nw", "--no-wait", default=False, is_flag=True, help="Return immideately if server doesn't autosign")
+@click.option("-nw", "--no-wait", default=False, is_flag=True, help="Return immediately if server doesn't autosign")
 def certidude_enroll(fork, no_wait, kerberos):
     try:
         os.makedirs(const.RUN_DIR)
     except FileExistsError:
         pass
 
-    context = globals()
-    context.update(locals())
-
     if not os.path.exists(const.CLIENT_CONFIG_PATH):
         click.echo("Client not configured, so not going to enroll")
         return
 
     clients = ConfigTreeParser(const.CLIENT_CONFIG_PATH)
-    service_config = ConfigTreeParser(const.SERVICES_CONFIG_PATH)
 
     for authority_name in clients.sections():
         try:
@@ -172,34 +169,28 @@ def certidude_enroll(fork, no_wait, kerberos):
             authority_public_key = asymmetric.load_public_key(
                 authority_certificate["tbs_certificate"]["subject_public_key_info"])
 
-
-
-        # Attempt to install CA certificates system wide
         try:
-            authority_system_wide = clients.getboolean(authority_name, "system wide")
+            config_path = clients.get(authority_name, "config path")
         except NoOptionError:
-            authority_system_wide = False
+            config_path = "/etc/certidude/authority/%s/config.json" % authority_name
         finally:
-            if authority_system_wide:
-                # Firefox, Chromium, wget, curl on Fedora
-                # Note that if ~/.pki/nssdb has been customized before, curl breaks
-                if os.path.exists("/usr/bin/update-ca-trust"):
-                    link_path = "/etc/pki/ca-trust/source/anchors/%s" % authority_name
-                    if not os.path.lexists(link_path):
-                        os.symlink(authority_path, link_path)
-                    os.system("update-ca-trust")
+            if os.path.exists(config_path):
+                click.echo("Found config in: %s" % config_path)
+                with open(config_path) as fh:
+                     bootstrap = json.loads(fh.read())
+            else:
+                bootstrap_url = "http://%s/api/bootstrap/" % authority_name
+                click.echo("Attempting to bootstrap connection from %s" % bootstrap_url)
+                r = requests.get(bootstrap_url)
+                if r.status_code != 200:
+                    raise ValueError("Bootstrap API endpoint returned %s" % r.content)
+                bootstrap = r.json()
 
-                # curl on Fedora ?
-                # pip
-
-                # Firefox (?) on Debian, Ubuntu
-                if os.path.exists("/usr/bin/update-ca-certificates") or os.path.exists("/usr/sbin/update-ca-certificates"):
-                    link_path = "/usr/local/share/ca-certificates/%s" % authority_name
-                    if not os.path.lexists(link_path):
-                        os.symlink(authority_path, link_path)
-                    os.system("update-ca-certificates")
-
-                # TODO: test for curl, wget
+                config_partial = config_path + ".part"
+                with open(config_partial, "wb") as oh:
+                    oh.write(r.content)
+                click.echo("Writing configuration to: %s" % config_path)
+                os.rename(config_partial, config_path)
 
         try:
             common_name = clients.get(authority_name, "common name")
@@ -326,7 +317,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             if submission.status_code == requests.codes.ok:
                 pass
             if submission.status_code == requests.codes.accepted:
-                click.echo("Server accepted the request, but refused to sign immideately (%s). Waiting was not requested, hence quitting for now" % submission.text)
+                click.echo("Server accepted the request, but refused to sign immediately (%s). Waiting was not requested, hence quitting for now" % submission.text)
                 os.unlink(pid_path)
                 continue
             if submission.status_code == requests.codes.conflict:
@@ -367,179 +358,191 @@ def certidude_enroll(fork, no_wait, kerberos):
         ### Configure related services ###
         ##################################
 
-        for endpoint in service_config.sections():
-            if service_config.get(endpoint, "authority") != authority_name:
-                continue
+        endpoint = authority_name
+        method = "init/openvpn"
 
-            click.echo("Configuring '%s'" % endpoint)
-            csummer = hashlib.sha1()
-            csummer.update(endpoint.encode("ascii"))
-            csum = csummer.hexdigest()
-            uuid = csum[:8] + "-" + csum[8:12] + "-" + csum[12:16] + "-" + csum[16:20] + "-" + csum[20:32]
+        click.echo("Configuring '%s'" % endpoint)
+        csummer = hashlib.sha1()
+        csummer.update(endpoint.encode("ascii"))
+        csum = csummer.hexdigest()
+        uuid = csum[:8] + "-" + csum[8:12] + "-" + csum[12:16] + "-" + csum[16:20] + "-" + csum[20:32]
 
-            # Intranet HTTPS handled by PKCS#12 bundle generation,
-            # so it will not be implemented here
+        # OpenVPN set up with initscripts
+        if method == "init/openvpn":
+            openvpn_config_path = "/etc/openvpn/%s.conf" % endpoint
+            print(bootstrap)
+            with open(openvpn_config_path + ".part", "w") as fh:
+                fh.write("client\n")
+                fh.write("nobind\n")
+                fh.write("remote %s 1194 udp\n" % endpoint)
+                fh.write("tls-version-min 1.2\n")
+                fh.write("tls-cipher %s\n" % bootstrap["openvpn"]["tls_cipher"])
+                fh.write("cipher %s\n" % bootstrap["openvpn"]["cipher"])
+                fh.write("auth %s\n" % bootstrap["openvpn"]["auth"])
+                fh.write("mute-replay-warnings\n")
+                fh.write("reneg-sec 0\n")
+                fh.write("remote-cert-tls server\n")
+                fh.write("dev tun\n")
+                fh.write("persist-tun\n")
+                fh.write("persist-key\n")
+                fh.write("ca %s\n" % authority_path)
+                fh.write("key %s\n" % key_path)
+                fh.write("cert %s\n" % certificate_path)
+            os.rename(openvpn_config_path + ".part", openvpn_config_path)
+            if os.path.exists("/bin/systemctl"):
+                click.echo("Re-running systemd generators for OpenVPN...")
+                os.system("systemctl daemon-reload")
+#            if not os.path.exists("/etc/systemd/system/openvpn-reconnect.service"):
+#                with open("/etc/systemd/system/openvpn-reconnect.service.part", "w") as fh:
+#                    fh.write(env.get_template("client/openvpn-reconnect.service").render(context))
+#                os.rename("/etc/systemd/system/openvpn-reconnect.service.part",
+#                    "/etc/systemd/system/openvpn-reconnect.service")
+#                click.echo("Created /etc/systemd/system/openvpn-reconnect.service")
+                os.system("systemctl restart openvpn")
+            continue
 
-            # OpenVPN set up with initscripts
-            if service_config.get(endpoint, "service") == "init/openvpn":
-                if os.path.exists("/etc/openvpn/%s.disabled" % endpoint) and not os.path.exists("/etc/openvpn/%s.conf" % endpoint):
-                    os.rename("/etc/openvpn/%s.disabled" % endpoint, "/etc/openvpn/%s.conf" % endpoint)
-                if os.path.exists("/bin/systemctl"):
-                    click.echo("Re-running systemd generators for OpenVPN...")
-                    os.system("systemctl daemon-reload")
-                if not os.path.exists("/etc/systemd/system/openvpn-reconnect.service"):
-                    with open("/etc/systemd/system/openvpn-reconnect.service.part", "w") as fh:
-                        fh.write(env.get_template("client/openvpn-reconnect.service").render(context))
-                    os.rename("/etc/systemd/system/openvpn-reconnect.service.part",
-                        "/etc/systemd/system/openvpn-reconnect.service")
-                    click.echo("Created /etc/systemd/system/openvpn-reconnect.service")
-                click.echo("Starting OpenVPN...")
-                os.system("service openvpn start")
-                continue
-
-            # IPSec set up with initscripts
-            if service_config.get(endpoint, "service") == "init/strongswan":
-                config = loads(open("%s/ipsec.conf" % const.STRONGSWAN_PREFIX).read())
-                for section_type, section_name in config:
-                    # Identify correct ipsec.conf section by leftcert
-                    if section_type != "conn":
-                        continue
-                    if config[section_type,section_name]["leftcert"] != certificate_path:
-                        continue
-
-                    if config[section_type,section_name].get("left", "") == "%defaultroute":
-                        config[section_type,section_name]["auto"] = "start" # This is client
-                    elif config[section_type,section_name].get("leftsourceip", ""):
-                        config[section_type,section_name]["auto"] = "add" # This is server
-                    else:
-                        config[section_type,section_name]["auto"] = "route" # This is site-to-site tunnel
-
-                    with open("%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX, "w") as fh:
-                        fh.write(config.dumps())
-                    os.rename(
-                        "%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX,
-                        "%s/ipsec.conf" % const.STRONGSWAN_PREFIX)
-                    break
-
-                # Tune AppArmor profile, TODO: retain contents
-                if os.path.exists("/etc/apparmor.d/local"):
-                    with open("/etc/apparmor.d/local/usr.lib.ipsec.charon", "w") as fh:
-                        fh.write(key_path + " r,\n")
-                        fh.write(authority_path + " r,\n")
-                        fh.write(certificate_path + " r,\n")
-
-                # Attempt to reload config or start if it's not running
-                if os.path.exists("/usr/sbin/strongswan"): # wtf fedora
-                    if os.system("strongswan update"):
-                        os.system("strongswan start")
-                else:
-                    if os.system("ipsec update"):
-                        os.system("ipsec start")
-
-                continue
-
-            # OpenVPN set up with NetworkManager
-            if service_config.get(endpoint, "service") == "network-manager/openvpn":
-                # NetworkManager-strongswan-gnome
-                nm_config_path = os.path.join("/etc/NetworkManager/system-connections", endpoint)
-                if os.path.exists(nm_config_path):
-                    click.echo("Not creating %s, remove to regenerate" % nm_config_path)
+        # IPSec set up with initscripts
+        if method == "init/strongswan":
+            config = loads(open("%s/ipsec.conf" % const.STRONGSWAN_PREFIX).read())
+            for section_type, section_name in config:
+                # Identify correct ipsec.conf section by leftcert
+                if section_type != "conn":
                     continue
-                nm_config = ConfigParser()
-                nm_config.add_section("connection")
-                nm_config.set("connection", "certidude managed", "true")
-                nm_config.set("connection", "id", endpoint)
-                nm_config.set("connection", "uuid", uuid)
-                nm_config.set("connection", "type", "vpn")
-                nm_config.add_section("vpn")
-                nm_config.set("vpn", "service-type", "org.freedesktop.NetworkManager.openvpn")
-                nm_config.set("vpn", "connection-type", "tls")
-                nm_config.set("vpn", "comp-lzo", "no")
-                nm_config.set("vpn", "cert-pass-flags", "0")
-                nm_config.set("vpn", "tap-dev", "no")
-                nm_config.set("vpn", "remote-cert-tls", "server") # Assert TLS Server flag of X.509 certificate
-                nm_config.set("vpn", "remote", service_config.get(endpoint, "remote"))
-                nm_config.set("vpn", "key", key_path)
-                nm_config.set("vpn", "cert", certificate_path)
-                nm_config.set("vpn", "ca", authority_path)
-                nm_config.set("vpn", "tls-cipher", "TLS-%s-WITH-AES-256-GCM-SHA384" % (
-                    "ECDHE-ECDSA" if authority_public_key.algorithm == "ec" else "DHE-RSA"))
-                nm_config.set("vpn", "cipher", "AES-128-GCM")
-                nm_config.set("vpn", "auth", "SHA384")
-                nm_config.add_section("ipv4")
-                nm_config.set("ipv4", "method", "auto")
-                nm_config.set("ipv4", "never-default", "true")
-                nm_config.add_section("ipv6")
-                nm_config.set("ipv6", "method", "auto")
+                if config[section_type,section_name]["leftcert"] != certificate_path:
+                    continue
 
-                try:
-                    nm_config.set("vpn", "port", str(service_config.getint(endpoint, "port")))
-                except NoOptionError:
-                    nm_config.set("vpn", "port", "1194")
+                if config[section_type,section_name].get("left", "") == "%defaultroute":
+                    config[section_type,section_name]["auto"] = "start" # This is client
+                elif config[section_type,section_name].get("leftsourceip", ""):
+                    config[section_type,section_name]["auto"] = "add" # This is server
+                else:
+                    config[section_type,section_name]["auto"] = "route" # This is site-to-site tunnel
 
-                try:
-                    if service_config.get(endpoint, "proto") == "tcp":
-                        nm_config.set("vpn", "proto-tcp", "yes")
-                except NoOptionError:
-                    pass
+                with open("%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX, "w") as fh:
+                    fh.write(config.dumps())
+                os.rename(
+                    "%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX,
+                    "%s/ipsec.conf" % const.STRONGSWAN_PREFIX)
+                break
 
-                # Prevent creation of files with liberal permissions
-                os.umask(0o177)
+            # Tune AppArmor profile, TODO: retain contents
+            if os.path.exists("/etc/apparmor.d/local"):
+                with open("/etc/apparmor.d/local/usr.lib.ipsec.charon", "w") as fh:
+                    fh.write(key_path + " r,\n")
+                    fh.write(authority_path + " r,\n")
+                    fh.write(certificate_path + " r,\n")
 
-                # Write NetworkManager configuration
-                with open(nm_config_path, "w") as fh:
-                    nm_config.write(fh)
-                    click.echo("Created %s" % nm_config_path)
-                if os.path.exists("/run/NetworkManager"):
-                    os.system("nmcli con reload")
+            # Attempt to reload config or start if it's not running
+            if os.path.exists("/usr/sbin/strongswan"): # wtf fedora
+                if os.system("strongswan update"):
+                    os.system("strongswan start")
+            else:
+                if os.system("ipsec update"):
+                    os.system("ipsec start")
+
+            continue
+
+        # OpenVPN set up with NetworkManager
+        if method == "network-manager/openvpn":
+            # NetworkManager-strongswan-gnome
+            nm_config_path = os.path.join("/etc/NetworkManager/system-connections", endpoint)
+            if os.path.exists(nm_config_path):
+                click.echo("Not creating %s, remove to regenerate" % nm_config_path)
                 continue
+            nm_config = ConfigParser()
+            nm_config.add_section("connection")
+            nm_config.set("connection", "certidude managed", "true")
+            nm_config.set("connection", "id", endpoint)
+            nm_config.set("connection", "uuid", uuid)
+            nm_config.set("connection", "type", "vpn")
+            nm_config.add_section("vpn")
+            nm_config.set("vpn", "service-type", "org.freedesktop.NetworkManager.openvpn")
+            nm_config.set("vpn", "connection-type", "tls")
+            nm_config.set("vpn", "comp-lzo", "no")
+            nm_config.set("vpn", "cert-pass-flags", "0")
+            nm_config.set("vpn", "tap-dev", "no")
+            nm_config.set("vpn", "remote-cert-tls", "server") # Assert TLS Server flag of X.509 certificate
+            nm_config.set("vpn", "remote", service_config.get(endpoint, "remote"))
+            nm_config.set("vpn", "key", key_path)
+            nm_config.set("vpn", "cert", certificate_path)
+            nm_config.set("vpn", "ca", authority_path)
+            nm_config.set("vpn", "tls-cipher", "TLS-%s-WITH-AES-256-GCM-SHA384" % (
+                "ECDHE-ECDSA" if authority_public_key.algorithm == "ec" else "DHE-RSA"))
+            nm_config.set("vpn", "cipher", "AES-128-GCM")
+            nm_config.set("vpn", "auth", "SHA384")
+            nm_config.add_section("ipv4")
+            nm_config.set("ipv4", "method", "auto")
+            nm_config.set("ipv4", "never-default", "true")
+            nm_config.add_section("ipv6")
+            nm_config.set("ipv6", "method", "auto")
+
+            try:
+                nm_config.set("vpn", "port", str(service_config.getint(endpoint, "port")))
+            except NoOptionError:
+                nm_config.set("vpn", "port", "1194")
+
+            try:
+                if service_config.get(endpoint, "proto") == "tcp":
+                    nm_config.set("vpn", "proto-tcp", "yes")
+            except NoOptionError:
+                pass
+
+            # Prevent creation of files with liberal permissions
+            os.umask(0o177)
+
+            # Write NetworkManager configuration
+            with open(nm_config_path, "w") as fh:
+                nm_config.write(fh)
+                click.echo("Created %s" % nm_config_path)
+            if os.path.exists("/run/NetworkManager"):
+                os.system("nmcli con reload")
+            continue
 
 
-            # IPSec set up with NetworkManager
-            if service_config.get(endpoint, "service") == "network-manager/strongswan":
-                client_config = ConfigParser()
-                nm_config = ConfigParser()
-                nm_config.add_section("connection")
-                nm_config.set("connection", "certidude managed", "true")
-                nm_config.set("connection", "id", endpoint)
-                nm_config.set("connection", "uuid", uuid)
-                nm_config.set("connection", "type", "vpn")
-                nm_config.add_section("vpn")
-                nm_config.set("vpn", "service-type", "org.freedesktop.NetworkManager.strongswan")
-                nm_config.set("vpn", "encap", "no")
-                nm_config.set("vpn", "virtual", "yes")
-                nm_config.set("vpn", "method", "key")
-                nm_config.set("vpn", "ipcomp", "no")
-                nm_config.set("vpn", "address", service_config.get(endpoint, "remote"))
-                nm_config.set("vpn", "userkey", key_path)
-                nm_config.set("vpn", "usercert", certificate_path)
-                nm_config.set("vpn", "certificate", authority_path)
-                dhgroup = "ecp384" if authority_public_key.algorithm == "ec" else "modp2048"
-                nm_config.set("vpn", "ike", "aes256-sha384-prfsha384-" + dhgroup)
-                nm_config.set("vpn", "esp", "aes128gcm16-aes128gmac-" + dhgroup)
-                nm_config.set("vpn", "proposal", "yes")
+        # IPSec set up with NetworkManager
+        if method == "network-manager/strongswan":
+            client_config = ConfigParser()
+            nm_config = ConfigParser()
+            nm_config.add_section("connection")
+            nm_config.set("connection", "certidude managed", "true")
+            nm_config.set("connection", "id", endpoint)
+            nm_config.set("connection", "uuid", uuid)
+            nm_config.set("connection", "type", "vpn")
+            nm_config.add_section("vpn")
+            nm_config.set("vpn", "service-type", "org.freedesktop.NetworkManager.strongswan")
+            nm_config.set("vpn", "encap", "no")
+            nm_config.set("vpn", "virtual", "yes")
+            nm_config.set("vpn", "method", "key")
+            nm_config.set("vpn", "ipcomp", "no")
+            nm_config.set("vpn", "address", service_config.get(endpoint, "remote"))
+            nm_config.set("vpn", "userkey", key_path)
+            nm_config.set("vpn", "usercert", certificate_path)
+            nm_config.set("vpn", "certificate", authority_path)
+            dhgroup = "ecp384" if authority_public_key.algorithm == "ec" else "modp2048"
+            nm_config.set("vpn", "ike", "aes256-sha384-prfsha384-" + dhgroup)
+            nm_config.set("vpn", "esp", "aes128gcm16-aes128gmac-" + dhgroup)
+            nm_config.set("vpn", "proposal", "yes")
 
-                nm_config.add_section("ipv4")
-                nm_config.set("ipv4", "method", "auto")
+            nm_config.add_section("ipv4")
+            nm_config.set("ipv4", "method", "auto")
 
-                # Add routes, may need some more tweaking
-                if service_config.has_option(endpoint, "route"):
-                    for index, subnet in enumerate(service_config.get(endpoint, "route").split(","), start=1):
-                        nm_config.set("ipv4", "route%d" % index, subnet)
+            # Add routes, may need some more tweaking
+            if service_config.has_option(endpoint, "route"):
+                for index, subnet in enumerate(service_config.get(endpoint, "route").split(","), start=1):
+                    nm_config.set("ipv4", "route%d" % index, subnet)
 
-                # Prevent creation of files with liberal permissions
-                os.umask(0o177)
+            # Prevent creation of files with liberal permissions
+            os.umask(0o177)
 
-                # Write NetworkManager configuration
-                with open(os.path.join("/etc/NetworkManager/system-connections", endpoint), "w") as fh:
-                    nm_config.write(fh)
-                    click.echo("Created %s" % fh.name)
-                if os.path.exists("/run/NetworkManager"):
-                    os.system("nmcli con reload")
-                continue
+            # Write NetworkManager configuration
+            with open(os.path.join("/etc/NetworkManager/system-connections", endpoint), "w") as fh:
+                nm_config.write(fh)
+                click.echo("Created %s" % fh.name)
+            if os.path.exists("/run/NetworkManager"):
+                os.system("nmcli con reload")
+            continue
 
-            # TODO: Puppet, OpenLDAP, <insert awesomeness here>
-            click.echo("Unknown service: %s" % service_config.get(endpoint, "service"))
+        click.echo("Unknown service: %s" % service_config.get(endpoint, "service"))
         os.unlink(pid_path)
 
 
