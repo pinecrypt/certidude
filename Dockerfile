@@ -10,9 +10,11 @@ RUN echo "Dpkg::Use-Pty=0;" > /etc/apt/apt.conf.d/99quieter
 RUN apt-get update -qq
 RUN apt-get install -y -qq \
   python3-pip \
-  openvpn
+  openvpn \
+  strongswan
 
-COPY entrypoint.sh /entrypoint.sh
+COPY entrypoint-openvpn.sh /entrypoint-openvpn.sh
+COPY entrypoint-strongswan.sh /entrypoint-strongswan.sh
 COPY pinecrypt/client/. /src/pinecrypt/client
 COPY setup.py /src/
 COPY README.md /src/

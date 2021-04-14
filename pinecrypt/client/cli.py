@@ -3,6 +3,7 @@
 import click
 import hashlib
 import logging
+import ipsecparse
 import json
 import os
 import random
@@ -13,7 +14,6 @@ import socket
 import subprocess
 import sys
 import requests
-from ipsecparse import loads
 from asn1crypto import pem, x509
 from asn1crypto.csr import CertificationRequest
 from certbuilder import CertificateBuilder, pem_armor_certificate
@@ -51,7 +51,8 @@ class ConfigTreeParser(ConfigParser):
 
 @click.command("provision", help="Add endpoint to Certidude client config")
 @click.argument("authority")
-def certidude_provision(authority):
+@click.option("-m", "--method", help="Force connection method")
+def certidude_provision(authority, method):
     client_config = ConfigParser()
     try:
         os.makedirs(os.path.dirname(const.CLIENT_CONFIG_PATH))
@@ -71,6 +72,8 @@ def certidude_provision(authority):
         client_config.set(authority, "key path", os.path.join(b, "host_key.pem"))
         client_config.set(authority, "certificate path", os.path.join(b, "host_cert.pem"))
         client_config.set(authority, "authority path",  os.path.join(b, "ca_cert.pem"))
+        if method:
+            client_config.set(authority, "method", method)
         with open(const.CLIENT_CONFIG_PATH + ".part", 'w') as fh:
             client_config.write(fh)
         os.rename(const.CLIENT_CONFIG_PATH + ".part", const.CLIENT_CONFIG_PATH)
@@ -80,6 +83,7 @@ def certidude_provision(authority):
 @click.option("-k", "--kerberos", default=False, is_flag=True, help="Offer system keytab for auth")
 @click.option("-f", "--fork", default=False, is_flag=True, help="Fork to background")
 @click.option("-nw", "--no-wait", default=False, is_flag=True, help="Return immediately if server doesn't autosign")
+
 def certidude_enroll(fork, no_wait, kerberos):
     try:
         os.makedirs(const.RUN_DIR)
@@ -359,7 +363,11 @@ def certidude_enroll(fork, no_wait, kerberos):
         ##################################
 
         endpoint = authority_name
-        method = "init/openvpn"
+
+        try:
+            method = clients.get(authority_name, "method")
+        except NoOptionError:
+            method = "init/openvpn"
 
         click.echo("Configuring '%s'" % endpoint)
         csummer = hashlib.sha1()
@@ -375,6 +383,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 fh.write("client\n")
                 fh.write("nobind\n")
                 fh.write("remote %s 1194 udp\n" % endpoint)
+                fh.write("remote %s 443 tcp\n" % endpoint)
                 fh.write("tls-version-min 1.2\n")
                 fh.write("tls-cipher %s\n" % bootstrap["openvpn"]["tls_cipher"])
                 fh.write("cipher %s\n" % bootstrap["openvpn"]["cipher"])
@@ -403,27 +412,37 @@ def certidude_enroll(fork, no_wait, kerberos):
 
         # IPSec set up with initscripts
         if method == "init/strongswan":
-            config = loads(open("%s/ipsec.conf" % const.STRONGSWAN_PREFIX).read())
-            for section_type, section_name in config:
-                # Identify correct ipsec.conf section by leftcert
-                if section_type != "conn":
-                    continue
-                if config[section_type,section_name]["leftcert"] != certificate_path:
-                    continue
+            strongswan_config_path = os.path.join(const.STRONGSWAN_PREFIX, "ipsec.conf")
+            strongswan_secrets_path = os.path.join(const.STRONGSWAN_PREFIX, "ipsec.secrets")
+            with open(strongswan_config_path) as fh:
+                config = ipsecparse.loads(fh.read())
+            config["ca", endpoint] = {}
+            config["ca", endpoint]["cacert"] = authority_path
+            config["ca", endpoint]["auto"] = "add"
+            config["conn", endpoint] = {}
+            config["conn", endpoint]["auto"] = "start"
+            config["conn", endpoint]["right"] = endpoint
+            config["conn", endpoint]["keyingtries"] = "%forever"
+            config["conn", endpoint]["dpdaction"] = "restart"
+            config["conn", endpoint]["closeaction"] = "restart"
+            config["conn", endpoint]["ike"] = "%s!" % bootstrap["strongswan"]["ike"]
+            config["conn", endpoint]["esp"] = "%s!" % bootstrap["strongswan"]["esp"]
+            config["conn", endpoint]["left"] = "%defaultroute"
+            config["conn", endpoint]["leftcert"] = certificate_path
+#    leftca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
+#    rightca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
 
-                if config[section_type,section_name].get("left", "") == "%defaultroute":
-                    config[section_type,section_name]["auto"] = "start" # This is client
-                elif config[section_type,section_name].get("leftsourceip", ""):
-                    config[section_type,section_name]["auto"] = "add" # This is server
-                else:
-                    config[section_type,section_name]["auto"] = "route" # This is site-to-site tunnel
 
-                with open("%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX, "w") as fh:
-                    fh.write(config.dumps())
-                os.rename(
-                    "%s/ipsec.conf.part" % const.STRONGSWAN_PREFIX,
-                    "%s/ipsec.conf" % const.STRONGSWAN_PREFIX)
-                break
+            with open(strongswan_secrets_path + ".part", "w") as fh:
+                fh.write(": %s %s`n" % (
+                  "ECDSA" if authority_public_key.algorithm == "ec" else "RSA",
+                  key_path
+                ))
+
+            with open(strongswan_config_path + ".part", "w") as fh:
+                fh.write(config.dumps())
+            os.rename(strongswan_secrets_path + ".part", strongswan_secrets_path)
+            os.rename(strongswan_config_path + ".part", strongswan_config_path)
 
             # Tune AppArmor profile, TODO: retain contents
             if os.path.exists("/etc/apparmor.d/local"):

@@ -20,3 +20,8 @@ try:
 except ValueError: # If FQDN is not configured
     HOSTNAME = FQDN
     DOMAIN = None
+
+if os.path.exists("/etc/strongswan/ipsec.conf"):
+    STRONGSWAN_PREFIX = "/etc/strongswan"
+else:
+    STRONGSWAN_PREFIX = "/etc"
