@@ -378,7 +378,6 @@ def certidude_enroll(fork, no_wait, kerberos):
         # OpenVPN set up with initscripts
         if method == "init/openvpn":
             openvpn_config_path = "/etc/openvpn/%s.conf" % endpoint
-            print(bootstrap)
             with open(openvpn_config_path + ".part", "w") as fh:
                 fh.write("client\n")
                 fh.write("nobind\n")
@@ -425,16 +424,17 @@ def certidude_enroll(fork, no_wait, kerberos):
             config["conn", endpoint]["keyingtries"] = "%forever"
             config["conn", endpoint]["dpdaction"] = "restart"
             config["conn", endpoint]["closeaction"] = "restart"
+            config["conn", endpoint]["rightsubnet"] = "0.0.0.0/0"
             config["conn", endpoint]["ike"] = "%s!" % bootstrap["strongswan"]["ike"]
             config["conn", endpoint]["esp"] = "%s!" % bootstrap["strongswan"]["esp"]
-            config["conn", endpoint]["left"] = "%defaultroute"
+            config["conn", endpoint]["leftsourceip"] = "%config"
             config["conn", endpoint]["leftcert"] = certificate_path
 #    leftca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
 #    rightca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
 
 
             with open(strongswan_secrets_path + ".part", "w") as fh:
-                fh.write(": %s %s`n" % (
+                fh.write(": %s %s\n" % (
                   "ECDSA" if authority_public_key.algorithm == "ec" else "RSA",
                   key_path
                 ))
