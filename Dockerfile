@@ -1,4 +1,5 @@
-FROM ubuntu:20.04 as build
+ARG base_image=ubuntu:20.04
+FROM $base_image as build
 ENV PYTHONUNBUFFERED=1
 ENV LC_ALL C.UTF-8
 ENV DEBIAN_FRONTEND noninteractive
