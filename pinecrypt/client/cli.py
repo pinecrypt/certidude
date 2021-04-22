@@ -383,8 +383,14 @@ def certidude_enroll(fork, no_wait, kerberos):
                 fh.write("nobind\n")
                 fh.write("remote %s 1194 udp\n" % endpoint)
                 fh.write("remote %s 443 tcp\n" % endpoint)
-                fh.write("tls-version-min 1.2\n")
-                fh.write("tls-cipher %s\n" % bootstrap["openvpn"]["tls_cipher"])
+                fh.write("tls-version-min %s\n" % bootstrap["openvpn"]["tls_version_min"])
+                if bootstrap["openvpn"]["tls_version_min"] == "1.3":
+                    fh.write("tls-ciphersuites %s\n" % bootstrap["openvpn"]["tls_ciphersuites"])
+                elif bootstrap["openvpn"]["tls_version_min"] == "1.2":
+                    fh.write("tls-cipher %s\n" % bootstrap["openvpn"]["tls_cipher"])
+                else:
+                    raise NotImplementedError("Unsupported TLS version")
+                fh.write("ncp-disable\n")
                 fh.write("cipher %s\n" % bootstrap["openvpn"]["cipher"])
                 fh.write("auth %s\n" % bootstrap["openvpn"]["auth"])
                 fh.write("mute-replay-warnings\n")
