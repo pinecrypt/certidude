@@ -487,30 +487,20 @@ def certidude_enroll(fork, no_wait, kerberos):
             nm_config.set("vpn", "cert-pass-flags", "0")
             nm_config.set("vpn", "tap-dev", "no")
             nm_config.set("vpn", "remote-cert-tls", "server") # Assert TLS Server flag of X.509 certificate
-            nm_config.set("vpn", "remote", service_config.get(endpoint, "remote"))
+            nm_config.set("vpn", "remote", endpoint)
             nm_config.set("vpn", "key", key_path)
             nm_config.set("vpn", "cert", certificate_path)
             nm_config.set("vpn", "ca", authority_path)
-            nm_config.set("vpn", "tls-cipher", "TLS-%s-WITH-AES-256-GCM-SHA384" % (
-                "ECDHE-ECDSA" if authority_public_key.algorithm == "ec" else "DHE-RSA"))
-            nm_config.set("vpn", "cipher", "AES-128-GCM")
-            nm_config.set("vpn", "auth", "SHA384")
+            nm_config.set("vpn", "tls-cipher", bootstrap["openvpn"]["tls_cipher"])
+            nm_config.set("vpn", "cipher", bootstrap["openvpn"]["cipher"])
+            nm_config.set("vpn", "auth", bootstrap["openvpn"]["auth"])
             nm_config.add_section("ipv4")
             nm_config.set("ipv4", "method", "auto")
             nm_config.set("ipv4", "never-default", "true")
             nm_config.add_section("ipv6")
             nm_config.set("ipv6", "method", "auto")
-
-            try:
-                nm_config.set("vpn", "port", str(service_config.getint(endpoint, "port")))
-            except NoOptionError:
-                nm_config.set("vpn", "port", "1194")
-
-            try:
-                if service_config.get(endpoint, "proto") == "tcp":
-                    nm_config.set("vpn", "proto-tcp", "yes")
-            except NoOptionError:
-                pass
+            nm_config.set("vpn", "port", "443")
+            nm_config.set("vpn", "proto-tcp", "yes")
 
             # Prevent creation of files with liberal permissions
             os.umask(0o177)
@@ -539,22 +529,16 @@ def certidude_enroll(fork, no_wait, kerberos):
             nm_config.set("vpn", "virtual", "yes")
             nm_config.set("vpn", "method", "key")
             nm_config.set("vpn", "ipcomp", "no")
-            nm_config.set("vpn", "address", service_config.get(endpoint, "remote"))
+            nm_config.set("vpn", "address", endpoint)
             nm_config.set("vpn", "userkey", key_path)
             nm_config.set("vpn", "usercert", certificate_path)
             nm_config.set("vpn", "certificate", authority_path)
-            dhgroup = "ecp384" if authority_public_key.algorithm == "ec" else "modp2048"
-            nm_config.set("vpn", "ike", "aes256-sha384-prfsha384-" + dhgroup)
-            nm_config.set("vpn", "esp", "aes128gcm16-aes128gmac-" + dhgroup)
+            nm_config.set("vpn", "ike", bootstrap["strongswan"]["ike"])
+            nm_config.set("vpn", "esp", bootstrap["strongswan"]["esp"])
             nm_config.set("vpn", "proposal", "yes")
 
             nm_config.add_section("ipv4")
             nm_config.set("ipv4", "method", "auto")
-
-            # Add routes, may need some more tweaking
-            if service_config.has_option(endpoint, "route"):
-                for index, subnet in enumerate(service_config.get(endpoint, "route").split(","), start=1):
-                    nm_config.set("ipv4", "route%d" % index, subnet)
 
             # Prevent creation of files with liberal permissions
             os.umask(0o177)
