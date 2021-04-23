@@ -511,6 +511,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 click.echo("Created %s" % nm_config_path)
             if os.path.exists("/run/NetworkManager"):
                 os.system("nmcli con reload")
+                os.system("nmcli con up %s" % uuid)
             continue
 
 
@@ -549,6 +550,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 click.echo("Created %s" % fh.name)
             if os.path.exists("/run/NetworkManager"):
                 os.system("nmcli con reload")
+                os.system("nmcli con up %s" % uuid)
             continue
 
         click.echo("Unknown service: %s" % service_config.get(endpoint, "service"))
