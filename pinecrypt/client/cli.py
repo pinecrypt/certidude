@@ -28,7 +28,7 @@ def selinux_fixup(path):
     """
     Fix OpenVPN credential store security context on Fedora
     """
-    if os.path.exists("/usr/bin/chcon"):
+    if os.path.exists("/usr/bin/chcon") and os.path.exists("/sys/fs/selinux"):
         cmd = "chcon", "--type=home_cert_t", path
         subprocess.call(cmd)
 
