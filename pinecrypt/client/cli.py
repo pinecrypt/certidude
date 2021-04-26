@@ -20,6 +20,7 @@ from certbuilder import CertificateBuilder, pem_armor_certificate
 from csrbuilder import CSRBuilder, pem_armor_csr
 from configparser import ConfigParser, NoOptionError
 from datetime import datetime, timedelta
+from email.utils import formatdate
 from oscrypto import asymmetric
 from pinecrypt.client import const
 
@@ -281,7 +282,8 @@ def certidude_enroll(fork, no_wait, kerberos):
                 "verify": authority_path,
                 "headers": {
                     "Content-Type": "application/pkcs10",
-                    "Accept": "application/x-x509-user-cert,application/x-pem-file"
+                    "Accept": "application/x-x509-user-cert,application/x-pem-file",
+                    "Date": formatdate(usegmt=True),
                 }
             }
 
