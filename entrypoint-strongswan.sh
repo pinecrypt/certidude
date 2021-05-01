@@ -4,5 +4,5 @@ sleep 10
 set -e
 $@
 AUTHORITY=$3
-test -f /etc/certidude/authority/ca5.dev.lan/host_cert.pem
+test -f /etc/certidude/authority/$AUTHORITY/host_cert.pem
 /usr/sbin/ipsec start --nofork
