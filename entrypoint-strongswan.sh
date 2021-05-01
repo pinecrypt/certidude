@@ -1,4 +1,5 @@
 #!/bin/sh
+rm -fv /run/certidude/*.pid
 sleep 10
 set -e
 $@
