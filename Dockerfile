@@ -12,7 +12,8 @@ RUN apt-get update -qq \
  && apt-get install -y -qq \
   python3-pip \
   openvpn \
-  strongswan
+  strongswan \
+  libcharon-extra-plugins
 
 # Dump on console what modules StrongSwan attempts to load
 RUN echo '#!/bin/bash' > /usr/sbin/modprobe \
