@@ -1,7 +1,6 @@
 #!/bin/sh
 set -e
 set -x
-rm -fv /run/*.pid /var/run/*.pid /run/*/*.pid /var/run/*/*.pid
 sleep 10
 $@
 AUTHORITY=$3
