@@ -145,62 +145,62 @@ def certidude_enroll(fork, no_wait, kerberos):
             authority_path = clients.get(authority_name, "authority path")
         except NoOptionError:
             authority_path = "/etc/certidude/authority/%s/ca_cert.pem" % authority_name
-        finally:
-            if os.path.exists(authority_path):
-                click.echo("Found authority certificate in: %s" % authority_path)
-                with open(authority_path, "rb") as fh:
-                    header, _, certificate_der_bytes = pem.unarmor(fh.read())
-                    authority_certificate = x509.Certificate.load(certificate_der_bytes)
-            else:
-                if not os.path.exists(os.path.dirname(authority_path)):
-                    os.makedirs(os.path.dirname(authority_path))
-                authority_url = "http://%s/api/certificate/" % authority_name
-                click.echo("Attempting to fetch authority certificate from %s" % authority_url)
-                try:
-                    r = requests.get(authority_url,
-                        headers={"Accept": "application/x-x509-ca-cert,application/x-pem-file"})
-                    header, _, certificate_der_bytes = pem.unarmor(r.content)
-                    authority_certificate = x509.Certificate.load(certificate_der_bytes)
-                except requests.exceptions.ConnectionError:
-                    click.echo("Connection error while attempting to fetch %s" % authority_url)
-                    continue
-                authority_partial = authority_path + ".part"
-                with open(authority_partial, "wb") as oh:
-                    oh.write(r.content)
-                click.echo("Writing authority certificate to: %s" % authority_path)
-                selinux_fixup(authority_partial)
-                os.rename(authority_partial, authority_path)
 
-            authority_public_key = asymmetric.load_public_key(
-                authority_certificate["tbs_certificate"]["subject_public_key_info"])
+        if os.path.exists(authority_path):
+            click.echo("Found authority certificate in: %s" % authority_path)
+            with open(authority_path, "rb") as fh:
+                header, _, certificate_der_bytes = pem.unarmor(fh.read())
+                authority_certificate = x509.Certificate.load(certificate_der_bytes)
+        else:
+            if not os.path.exists(os.path.dirname(authority_path)):
+                os.makedirs(os.path.dirname(authority_path))
+            authority_url = "http://%s/api/certificate/" % authority_name
+            click.echo("Attempting to fetch authority certificate from %s" % authority_url)
+            try:
+                r = requests.get(authority_url,
+                    headers={"Accept": "application/x-x509-ca-cert,application/x-pem-file"})
+                header, _, certificate_der_bytes = pem.unarmor(r.content)
+                authority_certificate = x509.Certificate.load(certificate_der_bytes)
+            except requests.exceptions.ConnectionError:
+                click.echo("Connection error while attempting to fetch %s" % authority_url)
+                continue
+            authority_partial = authority_path + ".part"
+            with open(authority_partial, "wb") as oh:
+                oh.write(r.content)
+            click.echo("Writing authority certificate to: %s" % authority_path)
+            selinux_fixup(authority_partial)
+            os.rename(authority_partial, authority_path)
+
+        authority_public_key = asymmetric.load_public_key(
+            authority_certificate["tbs_certificate"]["subject_public_key_info"])
 
         try:
             config_path = clients.get(authority_name, "config path")
         except NoOptionError:
             config_path = "/etc/certidude/authority/%s/config.json" % authority_name
-        finally:
-            if os.path.exists(config_path):
-                click.echo("Found config in: %s" % config_path)
-                with open(config_path) as fh:
-                     bootstrap = json.loads(fh.read())
-            else:
-                bootstrap_url = "http://%s/api/bootstrap/" % authority_name
-                click.echo("Attempting to bootstrap connection from %s" % bootstrap_url)
-                try:
-                    r = requests.get(bootstrap_url)
-                except requests.exceptions.ConnectionError:
-                    click.echo("Connection error while attempting to fetch %s" % bootstrap_url)
-                    continue
-                else:
-                    if r.status_code != 200:
-                        raise ValueError("Bootstrap API endpoint returned %s" % r.content)
-                bootstrap = r.json()
 
-                config_partial = config_path + ".part"
-                with open(config_partial, "wb") as oh:
-                    oh.write(r.content)
-                click.echo("Writing configuration to: %s" % config_path)
-                os.rename(config_partial, config_path)
+        if os.path.exists(config_path):
+            click.echo("Found config in: %s" % config_path)
+            with open(config_path) as fh:
+                bootstrap = json.loads(fh.read())
+        else:
+            bootstrap_url = "http://%s/api/bootstrap/" % authority_name
+            click.echo("Attempting to bootstrap connection from %s" % bootstrap_url)
+            try:
+                r = requests.get(bootstrap_url)
+            except requests.exceptions.ConnectionError:
+                click.echo("Connection error while attempting to fetch %s" % bootstrap_url)
+                continue
+            else:
+                if r.status_code != 200:
+                    raise ValueError("Bootstrap API endpoint returned %s" % r.content)
+            bootstrap = r.json()
+
+            config_partial = config_path + ".part"
+            with open(config_partial, "wb") as oh:
+                oh.write(r.content)
+            click.echo("Writing configuration to: %s" % config_path)
+            os.rename(config_partial, config_path)
 
         try:
             common_name = clients.get(authority_name, "common name")
