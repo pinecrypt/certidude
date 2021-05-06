@@ -161,9 +161,9 @@ def certidude_enroll(fork, no_wait, kerberos):
                         headers={"Accept": "application/x-x509-ca-cert,application/x-pem-file"})
                     header, _, certificate_der_bytes = pem.unarmor(r.content)
                     authority_certificate = x509.Certificate.load(certificate_der_bytes)
-                except: # TODO: catch correct exceptions
-                    raise
-                #    raise ValueError("Failed to parse PEM: %s" % r.text)
+                except requests.exceptions.ConnectionError:
+                    click.echo("Connection error while attempting to fetch %s" % authority_url)
+                    continue
                 authority_partial = authority_path + ".part"
                 with open(authority_partial, "wb") as oh:
                     oh.write(r.content)
@@ -186,9 +186,14 @@ def certidude_enroll(fork, no_wait, kerberos):
             else:
                 bootstrap_url = "http://%s/api/bootstrap/" % authority_name
                 click.echo("Attempting to bootstrap connection from %s" % bootstrap_url)
-                r = requests.get(bootstrap_url)
-                if r.status_code != 200:
-                    raise ValueError("Bootstrap API endpoint returned %s" % r.content)
+                try:
+                    r = requests.get(bootstrap_url)
+                except requests.exceptions.ConnectionError:
+                    click.echo("Connection error while attempting to fetch %s" % bootstrap_url)
+                    continue
+                else:
+                    if r.status_code != 200:
+                        raise ValueError("Bootstrap API endpoint returned %s" % r.content)
                 bootstrap = r.json()
 
                 config_partial = config_path + ".part"
@@ -314,7 +319,12 @@ def certidude_enroll(fork, no_wait, kerberos):
             request_url = "https://%s:8443/api/request/" % authority_name
             if request_params:
                 request_url = request_url + "?" + "&".join(request_params)
-            submission = requests.post(request_url, **kwargs)
+
+            try:
+                submission = requests.post(request_url, **kwargs)
+            except requests.exceptions.ConnectionError:
+                click.echo("Connection error while attempting to submit request to %s" % request_url)
+                continue
 
             # Destroy service ticket
             if os.path.exists("/tmp/ca.ticket"):
