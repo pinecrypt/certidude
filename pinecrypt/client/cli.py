@@ -352,10 +352,6 @@ def certidude_enroll(fork, no_wait, kerberos):
             except: # TODO: catch correct exceptions
                 raise ValueError("Failed to parse PEM: %s" % submission.text)
 
-            assert cert.subject.native["common_name"] == common_name, \
-                "Expected certificate with common name %s, but got %s instead" % \
-                    (common_name, cert.subject.native["common_name"])
-
             os.umask(0o022)
             certificate_partial = certificate_path + ".part"
             with open(certificate_partial, "w") as fh:
