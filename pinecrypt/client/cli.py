@@ -438,10 +438,10 @@ def certidude_enroll(fork, no_wait, kerberos):
             config["conn", endpoint]["keyingtries"] = "%forever"
             config["conn", endpoint]["dpdaction"] = "restart"
             config["conn", endpoint]["closeaction"] = "restart"
-            config["conn", endpoint]["rightsubnet"] = "0.0.0.0/0"
+            config["conn", endpoint]["rightsubnet"] = "0.0.0.0/0,::/0"
             config["conn", endpoint]["ike"] = "%s!" % bootstrap["strongswan"]["ike"]
             config["conn", endpoint]["esp"] = "%s!" % bootstrap["strongswan"]["esp"]
-            config["conn", endpoint]["leftsourceip"] = "%config"
+            config["conn", endpoint]["leftsourceip"] = "%config,%config6"
             config["conn", endpoint]["leftcert"] = certificate_path
 #    leftca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
 #    rightca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
