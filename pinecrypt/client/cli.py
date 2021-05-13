@@ -23,7 +23,22 @@ from datetime import datetime, timedelta
 from email.utils import formatdate
 from oscrypto import asymmetric
 from pinecrypt.client import const
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
+MAX_RETRIES = 30
+
+session = requests.Session()
+retry = Retry(
+    total=MAX_RETRIES,
+    read=MAX_RETRIES,
+    connect=MAX_RETRIES,
+    backoff_factor=0.3,
+    status_forcelist=(500, 502, 504),
+)
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
 
 def selinux_fixup(path):
     """
@@ -157,7 +172,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             authority_url = "http://%s/api/certificate/" % authority_name
             click.echo("Attempting to fetch authority certificate from %s" % authority_url)
             try:
-                r = requests.get(authority_url,
+                r = session.get(authority_url,
                     headers={"Accept": "application/x-x509-ca-cert,application/x-pem-file"})
                 header, _, certificate_der_bytes = pem.unarmor(r.content)
                 authority_certificate = x509.Certificate.load(certificate_der_bytes)
@@ -187,7 +202,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             bootstrap_url = "http://%s/api/bootstrap/" % authority_name
             click.echo("Attempting to bootstrap connection from %s" % bootstrap_url)
             try:
-                r = requests.get(bootstrap_url)
+                r = session.get(bootstrap_url)
             except requests.exceptions.ConnectionError:
                 click.echo("Connection error while attempting to fetch %s" % bootstrap_url)
                 continue
@@ -321,7 +336,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 request_url = request_url + "?" + "&".join(request_params)
 
             try:
-                submission = requests.post(request_url, **kwargs)
+                submission = session.post(request_url, **kwargs)
             except requests.exceptions.ConnectionError:
                 click.echo("Connection error while attempting to submit request to %s" % request_url)
                 continue
@@ -337,7 +352,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 os.unlink(pid_path)
                 continue
             if submission.status_code == requests.codes.conflict:
-                raise errors.DuplicateCommonNameError("Different signing request with same CN is already present on server, server refuses to overwrite")
+                raise ValueError("Different signing request with same CN is already present on server, server refuses to overwrite")
             elif submission.status_code == requests.codes.gone:
                 # Should the client retry or disable request submission?
                 raise ValueError("Server refused to sign the request") # TODO: Raise proper exception

@@ -1,6 +1,5 @@
 #!/bin/sh
 set -e
-set -x
 sleep 10
 $@
 AUTHORITY=$3
