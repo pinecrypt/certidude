@@ -2,24 +2,17 @@
 
 import click
 import hashlib
-import logging
 import ipsecparse
 import json
 import os
-import random
 import re
 import signal
-import string
-import socket
 import subprocess
-import sys
 import requests
 from asn1crypto import pem, x509
 from asn1crypto.csr import CertificationRequest
-from certbuilder import CertificateBuilder, pem_armor_certificate
 from csrbuilder import CSRBuilder, pem_armor_csr
 from configparser import ConfigParser, NoOptionError
-from datetime import datetime, timedelta
 from email.utils import formatdate
 from oscrypto import asymmetric
 from pinecrypt.client import const
@@ -37,8 +30,9 @@ retry = Retry(
     status_forcelist=(500, 502, 504),
 )
 adapter = HTTPAdapter(max_retries=retry)
-session.mount('http://', adapter)
-session.mount('https://', adapter)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
+
 
 def selinux_fixup(path):
     """
@@ -87,19 +81,19 @@ def certidude_provision(authority, method):
         client_config.set(authority, "request path", os.path.join(b, "host_req.pem"))
         client_config.set(authority, "key path", os.path.join(b, "host_key.pem"))
         client_config.set(authority, "certificate path", os.path.join(b, "host_cert.pem"))
-        client_config.set(authority, "authority path",  os.path.join(b, "ca_cert.pem"))
+        client_config.set(authority, "authority path", os.path.join(b, "ca_cert.pem"))
         if method:
             client_config.set(authority, "method", method)
-        with open(const.CLIENT_CONFIG_PATH + ".part", 'w') as fh:
+        with open(const.CLIENT_CONFIG_PATH + ".part", "w") as fh:
             client_config.write(fh)
         os.rename(const.CLIENT_CONFIG_PATH + ".part", const.CLIENT_CONFIG_PATH)
     os.system("certidude enroll")
+
 
 @click.command("enroll", help="Run processes for requesting certificates and configuring services")
 @click.option("-k", "--kerberos", default=False, is_flag=True, help="Offer system keytab for auth")
 @click.option("-f", "--fork", default=False, is_flag=True, help="Fork to background")
 @click.option("-nw", "--no-wait", default=False, is_flag=True, help="Return immediately if server doesn't autosign")
-
 def certidude_enroll(fork, no_wait, kerberos):
     try:
         os.makedirs(const.RUN_DIR)
@@ -128,10 +122,9 @@ def certidude_enroll(fork, no_wait, kerberos):
         else:
             raise
 
-
-        #########################
-        ### Fork if requested ###
-        #########################
+        #####################
+        # Fork if requested #
+        #####################
 
         pid_path = os.path.join(const.RUN_DIR, authority_name + ".pid")
 
@@ -233,10 +226,9 @@ def certidude_enroll(fork, no_wait, kerberos):
         if not re.match(const.RE_COMMON_NAME, common_name):
             raise ValueError("Supplied common name %s doesn't match the expression %s" % (common_name, const.RE_COMMON_NAME))
 
-
-        ################################
-        ### Generate keypair and CSR ###
-        ################################
+        ############################
+        # Generate keypair and CSR #
+        ############################
 
         try:
             key_path = clients.get(authority_name, "key path")
@@ -266,19 +258,18 @@ def certidude_enroll(fork, no_wait, kerberos):
 
             builder = CSRBuilder({"common_name": common_name}, self_public_key)
             request = builder.build(private_key)
-            with open(key_partial, 'wb') as f:
+            with open(key_partial, "wb") as f:
                 f.write(asymmetric.dump_private_key(private_key, None))
-            with open(request_partial, 'wb') as f:
+            with open(request_partial, "wb") as f:
                 f.write(pem_armor_csr(request))
             selinux_fixup(key_partial)
             selinux_fixup(request_partial)
             os.rename(key_partial, key_path)
             os.rename(request_partial, request_path)
 
-
-        ##############################################
-        ### Submit CSR and save signed certificate ###
-        ##############################################
+        ##########################################
+        # Submit CSR and save signed certificate #
+        ##########################################
 
         try:
             certificate_path = clients.get(authority_name, "certificate path")
@@ -314,7 +305,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 except ImportError:
                     click.echo("Kerberos bindings not available, please install requests-kerberos")
                 else:
-                    os.environ["KRB5CCNAME"]="/tmp/ca.ticket"
+                    os.environ["KRB5CCNAME"] = "/tmp/ca.ticket"
 
                     # Mac OS X has keytab with lowercase hostname
                     cmd = "kinit -S HTTP/%s -k %s$" % (authority_name, const.HOSTNAME.lower())
@@ -348,14 +339,15 @@ def certidude_enroll(fork, no_wait, kerberos):
             if submission.status_code == requests.codes.ok:
                 pass
             if submission.status_code == requests.codes.accepted:
-                click.echo("Server accepted the request, but refused to sign immediately (%s). Waiting was not requested, hence quitting for now" % submission.text)
+                click.echo("Server accepted the request, but refused to sign immediately (%s). "
+                    "Waiting was not requested, hence quitting for now" % submission.text)
                 os.unlink(pid_path)
                 continue
             if submission.status_code == requests.codes.conflict:
                 raise ValueError("Different signing request with same CN is already present on server, server refuses to overwrite")
             elif submission.status_code == requests.codes.gone:
                 # Should the client retry or disable request submission?
-                raise ValueError("Server refused to sign the request") # TODO: Raise proper exception
+                raise ValueError("Server refused to sign the request")  # TODO: Raise proper exception
             elif submission.status_code == requests.codes.bad_request:
                 raise ValueError("Server said following, likely current certificate expired/revoked? %s" % submission.text)
             else:
@@ -363,8 +355,8 @@ def certidude_enroll(fork, no_wait, kerberos):
 
             try:
                 header, _, certificate_der_bytes = pem.unarmor(submission.content)
-                cert = x509.Certificate.load(certificate_der_bytes)
-            except: # TODO: catch correct exceptions
+                x509.Certificate.load(certificate_der_bytes)
+            except ValueError:
                 raise ValueError("Failed to parse PEM: %s" % submission.text)
 
             os.umask(0o022)
@@ -380,10 +372,9 @@ def certidude_enroll(fork, no_wait, kerberos):
         else:
             click.echo("Certificate found at %s and no renewal requested" % certificate_path)
 
-
-        ##################################
-        ### Configure related services ###
-        ##################################
+        ##############################
+        # Configure related services #
+        ##############################
 
         endpoint = authority_name
 
@@ -429,12 +420,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             if os.path.exists("/bin/systemctl"):
                 click.echo("Re-running systemd generators for OpenVPN...")
                 os.system("systemctl daemon-reload")
-#            if not os.path.exists("/etc/systemd/system/openvpn-reconnect.service"):
-#                with open("/etc/systemd/system/openvpn-reconnect.service.part", "w") as fh:
-#                    fh.write(env.get_template("client/openvpn-reconnect.service").render(context))
-#                os.rename("/etc/systemd/system/openvpn-reconnect.service.part",
-#                    "/etc/systemd/system/openvpn-reconnect.service")
-#                click.echo("Created /etc/systemd/system/openvpn-reconnect.service")
+                # TODO: Restore openvpn-reconnect.service here
                 os.system("systemctl restart openvpn")
             continue
 
@@ -458,14 +444,12 @@ def certidude_enroll(fork, no_wait, kerberos):
             config["conn", endpoint]["esp"] = "%s!" % bootstrap["strongswan"]["esp"]
             config["conn", endpoint]["leftsourceip"] = "%config,%config6"
             config["conn", endpoint]["leftcert"] = certificate_path
-#    leftca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
-#    rightca="$AUTHORITY_CERTIFICATE_DISTINGUISHED_NAME"
-
+            # TODO: Assert DN values here?
 
             with open(strongswan_secrets_path + ".part", "w") as fh:
                 fh.write(": %s %s\n" % (
-                  "ECDSA" if authority_public_key.algorithm == "ec" else "RSA",
-                  key_path
+                    "ECDSA" if authority_public_key.algorithm == "ec" else "RSA",
+                    key_path
                 ))
 
             with open(strongswan_config_path + ".part", "w") as fh:
@@ -481,7 +465,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                     fh.write(certificate_path + " r,\n")
 
             # Attempt to reload config or start if it's not running
-            if os.path.exists("/usr/sbin/strongswan"): # wtf fedora
+            if os.path.exists("/usr/sbin/strongswan"):  # wtf fedora
                 if os.system("strongswan update"):
                     os.system("strongswan start")
             else:
@@ -509,7 +493,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             nm_config.set("vpn", "comp-lzo", "no")
             nm_config.set("vpn", "cert-pass-flags", "0")
             nm_config.set("vpn", "tap-dev", "no")
-            nm_config.set("vpn", "remote-cert-tls", "server") # Assert TLS Server flag of X.509 certificate
+            nm_config.set("vpn", "remote-cert-tls", "server")  # Assert TLS Server flag of X.509 certificate
             nm_config.set("vpn", "remote", endpoint)
             nm_config.set("vpn", "key", key_path)
             nm_config.set("vpn", "cert", certificate_path)
@@ -537,10 +521,8 @@ def certidude_enroll(fork, no_wait, kerberos):
                 os.system("nmcli con up %s" % uuid)
             continue
 
-
         # IPSec set up with NetworkManager
         if method == "network-manager/strongswan":
-            client_config = ConfigParser()
             nm_config = ConfigParser()
             nm_config.add_section("connection")
             nm_config.set("connection", "certidude managed", "true")
@@ -557,7 +539,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             nm_config.set("vpn", "userkey", key_path)
             nm_config.set("vpn", "usercert", certificate_path)
             nm_config.set("vpn", "certificate", authority_path)
-            nm_config.set("vpn", "ike", bootstrap["strongswan"]["ike"])
+            nm_config.set("vpn", "ike", bootstrap["strongswan"]["ike"])  # TODO: Check if the ! syntax is used
             nm_config.set("vpn", "esp", bootstrap["strongswan"]["esp"])
             nm_config.set("vpn", "proposal", "yes")
 
@@ -576,7 +558,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 os.system("nmcli con up %s" % uuid)
             continue
 
-        click.echo("Unknown service: %s" % service_config.get(endpoint, "service"))
+        click.echo("Unknown provisioning method: %s" % method)
         os.unlink(pid_path)
 
 

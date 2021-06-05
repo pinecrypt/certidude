@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # coding: utf-8
-import os
 from setuptools import setup
 
 setup(
-    name = "certidude",
-    version = "0.2.1",
-    author = u"Pinecrypt Labs",
-    author_email = "lauri@pinecrypt.com",
-    description = "Certidude provisions VPN connections to Pinecrypt Gateway",
-    license = "MIT",
-    keywords = "falcon http jinja2 x509 pkcs11 webcrypto kerberos ldap",
-    url = "https://git.k-space.ee/pinecrypt/certidude",
+    name="certidude",
+    version="0.2.1",
+    author=u"Pinecrypt Labs",
+    author_email="lauri@pinecrypt.com",
+    description="Certidude provisions VPN connections to Pinecrypt Gateway",
+    license="MIT",
+    keywords="falcon http jinja2 x509 pkcs11 webcrypto kerberos ldap",
+    url="https://git.k-space.ee/pinecrypt/certidude",
     packages=[
         "pinecrypt.client",
     ],
@@ -40,4 +39,3 @@ setup(
         "Programming Language :: Python :: 3 :: Only",
     ],
 )
-
