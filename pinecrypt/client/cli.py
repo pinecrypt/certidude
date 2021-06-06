@@ -370,7 +370,7 @@ def certidude_enroll(fork, no_wait, kerberos):
             os.rename(certificate_partial, certificate_path)
 
         else:
-            click.echo("Certificate found at %s and no renewal requested" % certificate_path)
+            click.echo("Certificate found at %s" % certificate_path)
 
         ##############################
         # Configure related services #
