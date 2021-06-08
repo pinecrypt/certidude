@@ -62,7 +62,8 @@ class ConfigTreeParser(ConfigParser):
 @click.command("provision", help="Add endpoint to Certidude client config")
 @click.argument("authority")
 @click.option("-m", "--method", help="Force connection method")
-def certidude_provision(authority, method):
+@click.option("-k", "--kerberos", default=False, is_flag=True, help="Offer system keytab for auth")
+def certidude_provision(authority, method, kerberos):
     client_config = ConfigParser()
     try:
         os.makedirs(os.path.dirname(const.CLIENT_CONFIG_PATH))
@@ -76,7 +77,7 @@ def certidude_provision(authority, method):
         click.echo("Section '%s' added to %s" % (authority, const.CLIENT_CONFIG_PATH))
         b = os.path.join(os.path.join(const.CONFIG_DIR, "authority", authority))
         client_config.add_section(authority)
-        client_config.set(authority, "trigger", "interface up")
+        client_config.set(authority, "trigger", "domain joined" if kerberos else "interface up")
         client_config.set(authority, "common name", "$HOSTNAME")
         client_config.set(authority, "request path", os.path.join(b, "host_req.pem"))
         client_config.set(authority, "key path", os.path.join(b, "host_key.pem"))
@@ -298,6 +299,10 @@ def certidude_enroll(fork, no_wait, kerberos):
                 }
             }
 
+            # TODO: oh so exploitable
+            # TODO: don't read this from stored JSON
+            replica_name = bootstrap["hostname"]
+
             # If machine is joined to domain attempt to present machine credentials for authentication
             if kerberos:
                 try:
@@ -306,23 +311,25 @@ def certidude_enroll(fork, no_wait, kerberos):
                     click.echo("Kerberos bindings not available, please install requests-kerberos")
                 else:
                     os.environ["KRB5CCNAME"] = "/tmp/ca.ticket"
-
-                    # Mac OS X has keytab with lowercase hostname
-                    cmd = "kinit -S HTTP/%s -k %s$" % (authority_name, const.HOSTNAME.lower())
+                    # Fedora /w SSSD and Ubuntu /w Samba have keytab with uppercase hostname
+                    cmd = "kinit -S HTTP/%s -k %s$" % (replica_name, const.HOSTNAME.upper())
                     click.echo("Executing: %s" % cmd)
                     if os.system(cmd):
-                        # Fedora /w SSSD has keytab with uppercase hostname
-                        cmd = "kinit -S HTTP/%s -k %s$" % (authority_name, const.HOSTNAME.upper())
+                        # Mac OS X has keytab with lowercase hostname
+                        cmd = "kinit -S HTTP/%s -k %s$" % (replica_name, const.HOSTNAME.lower())
+                        click.echo("Executing: %s" % cmd)
                         if os.system(cmd):
                             # Failed, probably /etc/krb5.keytab contains spaghetti
                             raise ValueError("Failed to initialize Kerberos service ticket using machine keytab")
+                    # TODO: better error reporting, kinit returns 1 for both: if replica name is not found or
+                    # client is not found in Kerberos database
                     assert os.path.exists("/tmp/ca.ticket"), "Ticket not created!"
                     click.echo("Initialized Kerberos service ticket using machine keytab")
                     kwargs["auth"] = HTTPKerberosAuth(mutual_authentication=OPTIONAL, force_preemptive=True)
             else:
                 click.echo("Not using machine keytab")
 
-            request_url = "https://%s:8443/api/request/" % authority_name
+            request_url = "https://%s:8443/api/request/" % replica_name
             if request_params:
                 request_url = request_url + "?" + "&".join(request_params)
 
