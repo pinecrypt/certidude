@@ -6,10 +6,10 @@ setup(
     name="certidude",
     version="0.2.1",
     author=u"Pinecrypt Labs",
-    author_email="lauri@pinecrypt.com",
+    author_email="info@pinecrypt.com",
     description="Certidude provisions VPN connections to Pinecrypt Gateway",
     license="MIT",
-    keywords="falcon http jinja2 x509 pkcs11 webcrypto kerberos ldap",
+    keywords="x509 openvpn strongswan ipsec kerberos",
     url="https://git.k-space.ee/pinecrypt/certidude",
     packages=[
         "pinecrypt.client",
