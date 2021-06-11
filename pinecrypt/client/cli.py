@@ -411,7 +411,6 @@ def certidude_enroll(fork, no_wait, kerberos):
                     fh.write("tls-cipher %s\n" % bootstrap["openvpn"]["tls_cipher"])
                 else:
                     raise NotImplementedError("Unsupported TLS version")
-                fh.write("ncp-disable\n")
                 fh.write("cipher %s\n" % bootstrap["openvpn"]["cipher"])
                 fh.write("auth %s\n" % bootstrap["openvpn"]["auth"])
                 fh.write("mute-replay-warnings\n")
