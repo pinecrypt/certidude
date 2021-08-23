@@ -258,6 +258,7 @@ def certidude_enroll(fork, no_wait, kerberos):
                 NotImplemented
 
             builder = CSRBuilder({"common_name": common_name}, self_public_key)
+            builder.hash_algo = bootstrap["certificate"]["hash_algorithm"].replace("-", "").lower()  # sha1, sha256 sha512
             request = builder.build(private_key)
             with open(key_partial, "wb") as f:
                 f.write(asymmetric.dump_private_key(private_key, None))
